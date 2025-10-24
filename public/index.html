@@ -1,0 +1,800 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GoldRush vs Competitors - OHLCV</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --panel: #ffffff;
+        --text: #111827;
+        --muted: #6b7280;
+        --codex: #4cc9f0;
+        --goldrush: #f59e0b;
+        --grid: #e5e7eb;
+        --bucket-border: #e5e7eb;
+        --pill-bg: #f9fafb;
+        --pill-border: #e5e7eb;
+        --accent: #10b981;
+        --ring-shade: rgba(100,116,139,0.08);
+
+        /* Streaming-speed bar spacing (tweak to taste) */
+        --sv-bar-w: 3px;
+        --sv-gap:   3px;
+      }
+
+      html, body {
+        margin: 0;
+        height: 100%;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      header {
+        padding: 12px;
+        border-bottom: 1px solid #eee;
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+        flex-wrap: wrap;
+      }
+
+      label { font-size: 12px; color: #555; }
+      input, select, button { padding: 6px 8px; font-size: 14px; }
+
+      #grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        padding: 12px;
+        min-height: calc(100vh - 68px);
+        height: auto;
+        box-sizing: border-box;
+        grid-auto-rows: minmax(360px, auto);
+      }
+
+      @media (min-width: 1200px) { #grid { grid-template-columns: 1fr 1fr; } }
+      @media (max-width: 1100px) { #grid { grid-template-columns: 1fr; height: auto; } }
+
+      .card {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        min-height: 0;
+      }
+
+      .card header {
+        padding: 10px 12px;
+        border-bottom: 1px solid #f0f0f0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .vendor { font-weight: 600; }
+      .subtle { color: #6b7280; font-weight: 400; }
+      .chart { width: 100%; height: 100%; }
+      .chart-wrap { position: relative; height: 100%; min-height: 220px; }
+
+      .loading {
+        position: absolute; inset: 0; display: grid; place-items: center;
+        background: rgba(255,255,255,0.7);
+        font-size: 12px; color: #4b5563; z-index: 5; transition: opacity .2s ease;
+      }
+      .loading.hidden { opacity: 0; pointer-events: none; }
+
+      .legend {
+        position: absolute; top: 6px; left: 64px; z-index: 6;
+        font-size: 12px; color: #111827;
+        background: rgba(255,255,255,0.82);
+        padding: 2px 6px; border-radius: 4px;
+        box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+      }
+      .legend .k { color: #6b7280; margin-right: 4px; }
+      .legend .v { margin-right: 6px; }
+
+      .stats {
+        padding: 8px 12px;
+        display: grid;
+        grid-template-columns: auto auto 1fr;
+        gap: 8px 16px;
+        font-size: 12px; color: #444;
+        border-top: 1px solid #f0f0f0;
+        background: #fafafa;
+      }
+      .stat { display: flex; gap: 6px; align-items: baseline; }
+      .stat.full { grid-column: 1 / -1; }
+      .muted { color: #6b7280; }
+
+      /* Embeds */
+      .card.embed .chart-wrap { min-height: 480px; }
+      .card.embed .stats { display: none; }
+
+      .stop-btn {
+        position: fixed; right: 16px; bottom: 16px; z-index: 100;
+        padding: 10px 12px; font-size: 13px;
+        border: 1px solid #e5e7eb; border-radius: 8px;
+        background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+        cursor: pointer; color: #374151;
+      }
+      .stop-btn:hover { background: #f9fafb; }
+
+      #dexscreener-embed,
+      #geckoterminal-embed { position: absolute; inset: 0; width: 100%; height: 100%; }
+      #dexscreener-embed iframe,
+      #geckoterminal-embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+      /* ── Streaming Speed Visual ─────────────────────────── */
+      .sv { padding: 12px; }
+      .sv-rows {
+        display: grid;
+        grid-template-columns: 64px 1fr;
+        row-gap: 0;
+        align-items: start;
+      }
+      .sv-rows > .sv-track {
+        min-height: 140px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+      }
+      .sv-label { font-size: 12px; color: var(--muted); text-transform: lowercase; }
+
+      .sv-bars, .sv-labels {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: var(--sv-bar-w);
+        column-gap: var(--sv-gap);
+        width: max-content;
+      }
+
+      .sv-bar {
+        position: relative;
+        width: auto;            /* grid controls width */
+        height: 112px;
+        background: #f8fafc;
+        border-radius: 2px;
+        overflow: hidden;
+        outline: 1px dashed var(--bucket-border);
+      }
+      .sv-bar.snapshot.codex { background: rgba(76,201,240,0.18); }
+      .sv-bar.snapshot.gold  { background: rgba(245,158,11,0.18); }
+      .sv-bar.live { outline-style: solid; }
+
+      .sv-fill { position: absolute; left: 0; bottom: 0; width: 100%; height: 0%; opacity: .45; }
+      .sv-bar.live .sv-fill { opacity: .78; }
+      .sv-fill.codex { background: var(--codex); }
+      .sv-fill.gold  { background: var(--goldrush); }
+
+      .sv-tick {
+        font-size: 10px;
+        color: var(--muted);
+        text-align: center;
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        height: 112px;
+        overflow: hidden;
+      }
+
+      .sv-scroll {
+        overflow-x: auto;
+        overflow-y: hidden;
+        background: var(--panel);
+        border: 1px solid var(--bucket-border);
+        border-radius: 12px;
+      }
+      .sv-scroller { position: relative; width: 100%; overflow-x: auto; overflow-y: hidden; }
+      .sv-ring { display: none; }
+
+      .sv-track {
+        width: 100%;
+        background-image: repeating-linear-gradient(to right, var(--grid) 0, var(--grid) 1px, transparent 1px, transparent 20px);
+        background-position: 0 100%;
+        background-repeat: repeat-x;
+      }
+
+      .speed-card .stats { display: none; }
+    </style>
+    <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body>
+    <header>
+      <div>
+        <label>Pair Address</label><br/>
+        <input id="pair" size="48" placeholder="0x..." />
+      </div>
+      <div>
+        <label>Chain</label><br/>
+        <select id="chain">
+          <option value="BASE">Base</option>
+          <option value="BSC">BSC</option>
+          <option value="SOLANA">Solana</option>
+        </select>
+      </div>
+      <div>
+        <label>Interval</label><br/>
+        <select id="interval">
+          <option value="ONE_MINUTE" selected>ONE MINUTE</option>
+        </select>
+      </div>
+      <div>
+        <label>Timeframe</label><br/>
+        <select id="timeframe">
+          <option value="ONE_HOUR" selected>ONE HOUR</option>
+        </select>
+      </div>
+      <div>
+        <button id="load">Load Charts</button>
+      </div>
+    </header>
+
+    <div id="grid">
+      <div class="card">
+        <header><span id="codex-title" class="vendor">Codex</span> <span id="codex-token" class="subtle"></span></header>
+        <div class="chart-wrap"><div class="loading" id="codex-loading">Loading…</div><div id="codex" class="chart"></div><div id="codex-legend" class="legend"></div></div>
+        <div class="stats">
+          <div class="stat"><span class="muted">Last updated:</span> <span id="codex-last">—</span></div>
+          <div class="stat"><span class="muted">Refresh rate:</span> <span id="codex-refresh">—</span></div>
+          <div class="stat"><span class="muted">Candle age:</span> <span id="codex-latency">—</span></div>
+          <div class="stat full"><span class="muted">Last item:</span> <span id="codex-lastitem">—</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <header><span id="goldrush-title" class="vendor">GoldRush</span> <span id="goldrush-token" class="subtle"></span></header>
+        <div class="chart-wrap"><div class="loading" id="gold-loading">Loading…</div><div id="goldrush" class="chart"></div><div id="gold-legend" class="legend"></div></div>
+        <div class="stats">
+          <div class="stat"><span class="muted">Last updated:</span> <span id="gold-last">—</span></div>
+          <div class="stat"><span class="muted">Refresh rate:</span> <span id="gold-refresh">—</span></div>
+          <div class="stat"><span class="muted">Candle age:</span> <span id="gold-latency">—</span></div>
+          <div class="stat full"><span class="muted">Last item:</span> <span id="gold-lastitem">—</span></div>
+        </div>
+      </div>
+
+      <div class="card" style="grid-column: 1 / -1;">
+        <header><span class="vendor">Streaming Speed Visual</span></header>
+        <div class="sv sv-scroll">
+          <div class="sv-rows">
+            <div class="sv-label">codex</div>
+            <div class="sv-track" id="sv-codex-track">
+              <div class="sv-ring" id="sv-codex-ring"></div>
+              <div class="sv-scroller" id="sv-codex-scroller">
+                <div id="sv-codex" class="sv-bars" style="width:max-content"></div>
+                <div id="sv-codex-labels" class="sv-labels" style="width:max-content"></div>
+              </div>
+            </div>
+
+            <div class="sv-label">goldrush</div>
+            <div class="sv-track" id="sv-gold-track">
+              <div class="sv-ring" id="sv-gold-ring"></div>
+              <div class="sv-scroller" id="sv-gold-scroller">
+                <div id="sv-gold" class="sv-bars" style="width:max-content"></div>
+                <div id="sv-gold-labels" class="sv-labels" style="width:max-content"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card embed speed-card">
+        <header><span class="vendor">CoinGecko</span></header>
+        <div class="chart-wrap">
+          <div id="geckoterminal-embed">
+            <iframe id="gecko-iframe" title="GeckoTerminal Embed" src="" frameborder="0" allow="clipboard-write" allowfullscreen></iframe>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat full"><span class="muted">Note:</span> <span>Embedded chart (no sockets)</span></div>
+        </div>
+      </div>
+
+      <div class="card embed">
+        <header><span class="vendor">Dexscreener</span></header>
+        <div class="chart-wrap">
+          <div id="dexscreener-embed">
+            <iframe id="dex-iframe" src=""></iframe>
+          </div>
+        </div>
+        <div class="stats">
+          <div class="stat full"><span class="muted">Note:</span> <span>Embedded chart (no sockets)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ── Globals for cross-chart sync
+      let refPriceMin = null, refPriceMax = null, globalVolMax = null;
+      let refTimeMin = null, refTimeMax = null;
+
+      // ── Helpers
+      function utcMinute(tsSec) { return Math.floor(tsSec / 60) * 60; }
+
+      // Unified layout across BOTH rows so minute columns line up
+      function relayoutAllSpeed() {
+        const barsA = document.getElementById('sv-codex');
+        const labelsA = document.getElementById('sv-codex-labels');
+        const trackA = document.getElementById('sv-codex-track');
+        const barsB = document.getElementById('sv-gold');
+        const labelsB = document.getElementById('sv-gold-labels');
+        const trackB = document.getElementById('sv-gold-track');
+        if (!barsA || !labelsA || !barsB || !labelsB || !trackA || !trackB) return;
+
+        const root = getComputedStyle(document.documentElement);
+        const barWVar = (root.getPropertyValue('--sv-bar-w') || '3px').trim();
+        const gapVar  = (root.getPropertyValue('--sv-gap')   || '3px').trim();
+        const barWpx = Math.max(1, parseInt(barWVar, 10) || 3);
+        const gapPx  = Math.max(0, parseInt(gapVar, 10)  || 3);
+
+        const countA = barsA.children.length;
+        const countB = barsB.children.length;
+        const count = Math.max(countA, countB); // use max so both grids get the same column count
+
+        // pick a common width baseline so columns are identical
+        const width = Math.min(trackA.clientWidth, trackB.clientWidth);
+        const needed = count * barWpx + Math.max(0, count - 1) * gapPx;
+
+        function setFit(barsEl, labelsEl, colPx) {
+          barsEl.style.gridAutoColumns = '';
+          labelsEl.style.gridAutoColumns = '';
+          barsEl.style.gridTemplateColumns = `repeat(${count}, ${colPx}px)`;
+          labelsEl.style.gridTemplateColumns = `repeat(${count}, ${colPx}px)`;
+          barsEl.style.columnGap = `${gapPx}px`;
+          labelsEl.style.columnGap = `${gapPx}px`;
+          barsEl.style.width = '100%';
+          labelsEl.style.width = '100%';
+        }
+        function setNatural(barsEl, labelsEl) {
+          barsEl.style.gridTemplateColumns = '';
+          labelsEl.style.gridTemplateColumns = '';
+          barsEl.style.gridAutoColumns = `${barWpx}px`;
+          labelsEl.style.gridAutoColumns = `${barWpx}px`;
+          barsEl.style.columnGap = `${gapPx}px`;
+          labelsEl.style.columnGap = `${gapPx}px`;
+          barsEl.style.width = 'max-content';
+          labelsEl.style.width = 'max-content';
+        }
+
+        if (width > 0 && needed < width) {
+          const col = Math.max(barWpx, Math.floor((width - (count - 1) * gapPx) / count));
+          setFit(barsA, labelsA, col);
+          setFit(barsB, labelsB, col);
+        } else {
+          setNatural(barsA, labelsA);
+          setNatural(barsB, labelsB);
+        }
+
+        // adjust ring overlays to the actual pixel width for each track
+        try {
+          const ringA = document.getElementById('sv-codex-ring');
+          const ringB = document.getElementById('sv-gold-ring');
+          const gapA = parseInt(getComputedStyle(barsA).columnGap || '2', 10);
+          const gapB = parseInt(getComputedStyle(barsB).columnGap || '2', 10);
+          const barWA = barsA.firstElementChild ? barsA.firstElementChild.getBoundingClientRect().width : barWpx;
+          const barWB = barsB.firstElementChild ? barsB.firstElementChild.getBoundingClientRect().width : barWpx;
+          if (ringA) ringA.style.width = Math.max(0, (barsA.children.length * (barWA + gapA))) + 'px';
+          if (ringB) ringB.style.width = Math.max(0, (barsB.children.length * (barWB + gapB))) + 'px';
+        } catch {}
+      }
+
+      function ensureBarFor(streamKey, minute, { markLiveIfLatest = false } = {}) {
+        const isCodex = streamKey === 'codex';
+        const svBars   = document.getElementById(isCodex ? 'sv-codex'        : 'sv-gold');
+        const svLabels = document.getElementById(isCodex ? 'sv-codex-labels' : 'sv-gold-labels');
+        const svState  = isCodex ? (window.__svCodex ||= { lastMinute:null, barsByMinute:new Map(), minutes: [] })
+                                 : (window.__svGold  ||= { lastMinute:null, barsByMinute:new Map(), minutes: [] });
+
+        if (svState.barsByMinute.has(minute)) return svState.barsByMinute.get(minute);
+
+        // find sorted insert index
+        let i = 0;
+        while (i < svState.minutes.length && svState.minutes[i] < minute) i++;
+
+        // create nodes
+        const bar  = document.createElement('div');
+        bar.className = `sv-bar snapshot ${isCodex ? 'codex' : 'gold'}`;
+        const fill = document.createElement('div');
+        fill.className = `sv-fill ${isCodex ? 'codex' : 'gold'}`;
+        bar.appendChild(fill);
+
+        const tick = document.createElement('div');
+        tick.className = 'sv-tick';
+        const d = new Date(minute * 1000);
+        tick.textContent = `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+
+        // insert at correct position to keep DOM and labels sorted
+        svBars.insertBefore(bar,   svBars.children[i] || null);
+        svLabels.insertBefore(tick, svLabels.children[i] || null);
+
+        svState.minutes.splice(i, 0, minute);
+        const entry = { bar, fill };
+        svState.barsByMinute.set(minute, entry);
+
+        // unified relayout for both rows
+        relayoutAllSpeed();
+
+        // live state only for newest minute
+        if (markLiveIfLatest && (svState.lastMinute == null || minute >= svState.lastMinute)) {
+          if (svState.lastMinute != null && svState.lastMinute !== minute) {
+            const prev = svState.barsByMinute.get(svState.lastMinute);
+            if (prev?.fill) prev.fill.style.height = '100%';
+            prev?.bar?.classList.remove('live');
+          }
+          svState.lastMinute = minute;
+          try { bar.classList.add('live'); } catch {}
+        }
+
+        return entry;
+      }
+
+      function syncBothStreamsTo(minute) {
+        const codexEntry = ensureBarFor('codex', minute, { markLiveIfLatest: true });
+        const goldEntry  = ensureBarFor('gold',  minute, { markLiveIfLatest: true });
+        return { codexEntry, goldEntry };
+      }
+
+      function updateReferencePriceRangeFromCandles(candles) {
+        for (const c of candles) {
+          if (!c) continue;
+          const lows = [c.low, c.open, c.close].filter(v => typeof v === 'number');
+          const highs = [c.high, c.open, c.close].filter(v => typeof v === 'number');
+          const lo = Math.min.apply(null, lows);
+          const hi = Math.max.apply(null, highs);
+          if (!isFinite(lo) || !isFinite(hi)) continue;
+          refPriceMin = (refPriceMin == null) ? lo : Math.min(refPriceMin, lo);
+          refPriceMax = (refPriceMax == null) ? hi : Math.max(refPriceMax, hi);
+        }
+      }
+      function updateGlobalVolumeRangeFromCandles(candles) {
+        for (const c of candles) {
+          const v = Number(c.volume || 0);
+          if (!isFinite(v)) continue;
+          globalVolMax = (globalVolMax == null) ? v : Math.max(globalVolMax, v);
+        }
+      }
+      function updateReferenceTimeRangeFromCandles(candles) {
+        for (const c of candles) {
+          const t = c?.time;
+          if (!Number.isFinite(t)) continue;
+          refTimeMin = (refTimeMin == null) ? t : Math.min(refTimeMin, t);
+          refTimeMax = (refTimeMax == null) ? t : Math.max(refTimeMax, t);
+        }
+      }
+      function syncVisibleRangeForAllCharts() {
+        if (refTimeMin == null || refTimeMax == null || refTimeMax <= refTimeMin) return;
+        const range = { from: refTimeMin, to: refTimeMax };
+        try { codexViews?.chart.timeScale().setVisibleRange(range); } catch {}
+        try { goldViews?.chart.timeScale().setVisibleRange(range); } catch {}
+      }
+
+      function createChart(container, legendEl) {
+        const chart = LightweightCharts.createChart(container, {
+          layout: { background: { color: '#ffffff' }, textColor: '#222' },
+          leftPriceScale: { visible: true, borderVisible: true },
+          rightPriceScale: { visible: true, borderVisible: true },
+          timeScale: { borderVisible: false, timeVisible: true, secondsVisible: true, fixLeftEdge: true },
+          crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        });
+        try {
+          const resize = () => {
+            const rect = container.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) chart.resize(Math.floor(rect.width), Math.floor(rect.height));
+          };
+          new ResizeObserver(() => resize()).observe(container);
+          window.addEventListener('resize', resize);
+          resize();
+        } catch {}
+        chart.priceScale('left').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.3 } });
+        chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
+        const candles = chart.addCandlestickSeries({ priceScaleId: 'left', priceFormat: { type: 'price', precision: 7, minMove: 0.0000001 } });
+        const volumes = chart.addHistogramSeries({ priceScaleId: 'right', priceFormat: { type: 'volume' }, color: 'rgba(38,166,154,0.5)' });
+
+        const barsByTime = new Map();
+        function renderLegend(bar) {
+          if (!legendEl) return;
+          if (!bar) { legendEl.textContent = ''; return; }
+          legendEl.innerHTML =
+            `<span class="k">O</span><span class="v">${fmtPrice(bar.open)}</span>`+
+                               `<span class="k">H</span><span class="v">${fmtPrice(bar.high)}</span>`+
+                               `<span class="k">L</span><span class="v">${fmtPrice(bar.low)}</span>`+
+                               `<span class="k">C</span><span class="v">${fmtPrice(bar.close)}</span>`+
+                               `<span class="k">V</span><span class="v">${fmtNum(Number(bar.volume||0))}</span>`;
+        }
+        chart.subscribeCrosshairMove((param) => {
+          if (!param || !param.time) { renderLegend(null); return; }
+          const b = barsByTime.get(param.time);
+          if (b) renderLegend(b);
+        });
+        return { chart, candles, volumes, barsByTime, renderLegend };
+      }
+
+      function fmtTime(tsSec) {
+        if (!tsSec) return '—';
+        const d = new Date(tsSec * 1000);
+        const yyyy = d.getUTCFullYear();
+        const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        const HH = String(d.getUTCHours()).padStart(2, '0');
+        const MM = String(d.getUTCMinutes()).padStart(2, '0');
+        const SS = String(d.getUTCSeconds()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS} UTC`;
+      }
+      function fmtDelta(secondsSinceEpoch) {
+        if (!secondsSinceEpoch) return '—';
+        const now = Math.floor(Date.now() / 1000);
+        const diff = Math.max(0, now - secondsSinceEpoch);
+        const mm = Math.floor(diff / 60);
+        const ss = diff % 60;
+        return (mm > 0 ? mm + 'm ' : '') + ss + 's ago';
+      }
+      function fmtLatency(candleTs) {
+        if (!candleTs) return '—';
+        const now = Math.floor(Date.now() / 1000);
+        const diff = Math.max(0, now - candleTs);
+        const mm = Math.floor(diff / 60);
+        const ss = diff % 60;
+        return (mm > 0 ? mm + 'm ' : '') + ss + 's';
+      }
+      function updateLastAndDelta(state, lastEl, refreshEl, latencyEl) {
+        const recv = state.lastRecv;
+        const candle = state.lastCandle;
+        if (recv) {
+          lastEl.textContent = `${fmtTime(recv)} (candle ${fmtTime(candle)})`;
+          refreshEl.textContent = fmtDelta(recv);
+          latencyEl.textContent = fmtLatency(candle);
+        }
+      }
+      function fmtNum(n) {
+        if (n == null || !isFinite(n)) return '—';
+        if (Math.abs(n) >= 100) return Number(n).toFixed(2);
+        if (Math.abs(n) >= 1) return Number(n).toFixed(4);
+        return Number(n).toFixed(6);
+      }
+      function fmtPrice(n) {
+        if (n == null || !isFinite(n)) return '—';
+        return Number(n).toFixed(7);
+      }
+      function setLastItem(el, c) {
+        if (!el) return;
+        if (!c) { el.textContent = '—'; return; }
+        el.textContent = `t=${fmtTime(c.time)} | O ${fmtPrice(c.open)} H ${fmtPrice(c.high)} L ${fmtPrice(c.low)} C ${fmtPrice(c.close)}${c.volume != null ? ` | V ${fmtNum(Number(c.volume))}` : ''}`;
+      }
+
+      function attach(wsUrl, views, state, lastEl, refreshEl, latencyEl, lastItemEl, loadingEl, isReference) {
+        const ws = new WebSocket(wsUrl);
+        ws.onmessage = (ev) => {
+          const msg = JSON.parse(ev.data);
+          const nowSec = Math.floor(Date.now() / 1000);
+
+          const streamKey = isReference ? 'codex' : 'gold';
+          const svBars   = document.getElementById(isReference ? 'sv-codex'        : 'sv-gold');
+          const svLabels = document.getElementById(isReference ? 'sv-codex-labels' : 'sv-gold-labels');
+          const svState  = isReference ? (window.__svCodex ||= { lastMinute:null, barsByMinute:new Map(), minutes: [] })
+                                       : (window.__svGold  ||= { lastMinute:null, barsByMinute:new Map(), minutes: [] });
+
+          if (msg.type === 'snapshot') {
+            const cs = (msg.candles || []).map(c => ({
+              time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: Number(c.volume || 0)
+            }));
+            if (cs.length) {
+              if (isReference) updateReferencePriceRangeFromCandles(cs);
+              updateGlobalVolumeRangeFromCandles(cs);
+              if (isReference) updateReferenceTimeRangeFromCandles(cs);
+
+              views.candles.setData(cs);
+              views.volumes.setData(cs.map(c => ({ time: c.time, value: c.volume })));
+              for (const b of cs) views.barsByTime.set(b.time, b);
+              if (isReference) syncVisibleRangeForAllCharts();
+              try {
+                if (!isReference) {
+                  views.chart.timeScale().fitContent();
+                  views.chart.timeScale().scrollToRealTime();
+                } else {
+                  views.chart.timeScale().scrollToRealTime();
+                }
+              } catch {}
+
+              state.lastCandle = cs[cs.length - 1].time;
+              state.lastRecv = nowSec;
+              updateLastAndDelta(state, lastEl, refreshEl, latencyEl);
+              setLastItem(lastItemEl, cs[cs.length - 1]);
+              if (loadingEl) loadingEl.classList.add('hidden');
+              views.renderLegend(cs[cs.length - 1]);
+
+              // Build ordered bars for this stream and mirror to the other stream
+              if (svBars && svLabels) {
+                svBars.innerHTML = '';
+                svLabels.innerHTML = '';
+                svState.lastMinute = null;
+                svState.barsByMinute.clear();
+                svState.minutes = [];
+
+                const minutes = cs.map(c => utcMinute(c.time));
+                const uniqueMinutes = [...new Set(minutes)].sort((a,b)=>a-b);
+
+                for (const m of uniqueMinutes) ensureBarFor(streamKey, m);
+                for (const m of uniqueMinutes) ensureBarFor(isReference ? 'gold' : 'codex', m);
+                relayoutAllSpeed();
+              }
+            }
+          } else if (msg.type === 'update') {
+            const c = { time: msg.candle.time, open: msg.candle.open, high: msg.candle.high, low: msg.candle.low, close: msg.candle.close, volume: Number(msg.candle.volume || 0) };
+
+            if (isReference) updateReferencePriceRangeFromCandles([c]);
+            updateGlobalVolumeRangeFromCandles([c]);
+            if (isReference) updateReferenceTimeRangeFromCandles([c]);
+
+            views.candles.update(c);
+            views.volumes.update({ time: c.time, value: c.volume });
+            views.barsByTime.set(c.time, c);
+
+            state.lastCandle = c.time;
+            state.lastRecv = nowSec;
+            updateLastAndDelta(state, lastEl, refreshEl, latencyEl);
+            setLastItem(lastItemEl, c);
+            if (isReference) syncVisibleRangeForAllCharts();
+            if (loadingEl) loadingEl.classList.add('hidden');
+            views.renderLegend(c);
+            try { views.chart.timeScale().scrollToRealTime(); } catch {}
+
+            // streaming visual, synced minute rollover
+            const minute = utcMinute(c.time);
+            const { codexEntry, goldEntry } = syncBothStreamsTo(minute);
+            const entry = isReference ? codexEntry : goldEntry;
+
+            const pct = Math.max(0, Math.min(100, ((nowSec - minute) / 60) * 100));
+            entry.fill.style.height = pct + '%';
+
+            relayoutAllSpeed();
+
+            try {
+              const scroller = document.getElementById(isReference ? 'sv-codex-scroller' : 'sv-gold-scroller');
+              if (scroller) scroller.scrollTo({ left: scroller.scrollWidth, behavior: 'smooth' });
+            } catch {}
+          }
+        };
+        return ws;
+      }
+
+      const codexViews = createChart(document.getElementById('codex'), document.getElementById('codex-legend'));
+      const goldViews  = createChart(document.getElementById('goldrush'), document.getElementById('gold-legend'));
+      const codexLoadingEl = document.getElementById('codex-loading');
+      const goldLoadingEl  = document.getElementById('gold-loading');
+      let codexWS, goldWS;
+
+      const codexState = { lastCandle: null, lastRecv: null };
+      const goldState  = { lastCandle: null, lastRecv: null };
+      const codexLastEl = document.getElementById('codex-last');
+      const codexRefreshEl = document.getElementById('codex-refresh');
+      const codexLatencyEl = document.getElementById('codex-latency');
+      const codexLastItemEl = document.getElementById('codex-lastitem');
+      const goldLastEl = document.getElementById('gold-last');
+      const goldRefreshEl = document.getElementById('gold-refresh');
+      const goldLatencyEl = document.getElementById('gold-latency');
+      const goldLastItemEl = document.getElementById('gold-lastitem');
+      const codexTitleEl = document.getElementById('codex-title');
+      const codexTokenEl = document.getElementById('codex-token');
+      const goldTitleEl  = document.getElementById('goldrush-title');
+      const goldTokenEl  = document.getElementById('goldrush-token');
+
+      function short(addr) {
+        if (!addr) return '';
+        return addr.length > 12 ? addr.slice(0, 6) + '…' + addr.slice(-4) : addr;
+      }
+
+      // Metrics timer
+      let deltaTimer = null;
+      function startMetricsTimer() {
+        if (deltaTimer) return;
+        deltaTimer = setInterval(() => {
+          updateLastAndDelta(codexState, codexLastEl, codexRefreshEl, codexLatencyEl);
+          updateLastAndDelta(goldState,  goldLastEl,  goldRefreshEl,  goldLatencyEl);
+        }, 1000);
+      }
+      function stopMetricsTimer() { if (deltaTimer) { clearInterval(deltaTimer); deltaTimer = null; } }
+
+      async function loadCharts() {
+        const raw = document.getElementById('pair').value.trim();
+        const pair = raw.split(':')[0];
+        const chain = document.getElementById('chain').value;
+        if (!pair) { alert('Enter a pair address'); return; }
+
+        try { if (codexWS) codexWS.close(); } catch {}
+        try { if (goldWS)  goldWS.close();  } catch {}
+
+        codexState.lastCandle = codexState.lastRecv = null;
+        goldState.lastCandle  = goldState.lastRecv  = null;
+        codexLastEl.textContent = codexRefreshEl.textContent = codexLatencyEl.textContent = '—';
+        goldLastEl.textContent  = goldRefreshEl.textContent  = goldLatencyEl.textContent  = '—';
+
+        refPriceMin = refPriceMax = globalVolMax = refTimeMin = refTimeMax = null;
+
+        // Titles include truncated pair; subtles show (symbol arrives later) + chain
+        codexTitleEl.textContent = `Codex — ${short(pair)}`;
+        codexTokenEl.textContent = `— (${chain})`;
+        goldTitleEl.textContent  = `GoldRush — ${short(pair)}`;
+        goldTokenEl.textContent  = `— (${chain})`;
+
+        // reset visuals
+        try {
+          document.getElementById('sv-codex').innerHTML = '';
+          document.getElementById('sv-codex-labels').innerHTML = '';
+          document.getElementById('sv-gold').innerHTML = '';
+          document.getElementById('sv-gold-labels').innerHTML = '';
+          window.__svCodex = { lastMinute: null, barsByMinute: new Map(), minutes: [] };
+          window.__svGold  = { lastMinute: null, barsByMinute: new Map(), minutes: [] };
+          relayoutAllSpeed();
+        } catch {}
+
+        // embeds
+        updateDexEmbed(pair, chain);
+        updateGeckoEmbed(pair, chain);
+
+        codexLoadingEl.classList.remove('hidden');
+        goldLoadingEl.classList.remove('hidden');
+
+        const interval  = document.getElementById('interval').value || 'ONE_MINUTE';
+        const timeframe = document.getElementById('timeframe').value || 'ONE_HOUR';
+        const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+        const baseHost = location.host;
+
+        codexWS = attach(`${wsScheme}://${baseHost}/ws/codex?pair=${encodeURIComponent(pair)}&chain=${encodeURIComponent(chain)}&interval=${encodeURIComponent(interval)}&timeframe=${encodeURIComponent(timeframe)}`,
+                         codexViews, codexState, codexLastEl, codexRefreshEl, codexLatencyEl, codexLastItemEl, codexLoadingEl, true);
+        goldWS  = attach(`${wsScheme}://${baseHost}/ws/goldrush?pair=${encodeURIComponent(pair)}&chain=${encodeURIComponent(chain)}&interval=${encodeURIComponent(interval)}&timeframe=${encodeURIComponent(timeframe)}`,
+                         goldViews, goldState, goldLastEl, goldRefreshEl, goldLatencyEl, goldLastItemEl, goldLoadingEl, false);
+
+        // titles with symbols when meta arrives
+        if (codexWS) {
+          codexWS.addEventListener('message', (ev) => {
+            try { const m = JSON.parse(ev.data); if (m?.type === 'meta' && m.symbol) codexTokenEl.textContent = `— ${m.symbol} (${chain})`; } catch {}
+          });
+        }
+        if (goldWS) {
+          goldWS.addEventListener('message', (ev) => {
+            try { const m = JSON.parse(ev.data); if (m?.type === 'meta' && m.symbol) goldTokenEl.textContent  = `— ${m.symbol} (${chain})`; } catch {}
+          });
+        }
+      }
+
+      function updateDexEmbed(token, chain) {
+        try {
+          const ch = (chain || '').toLowerCase();
+          const src = `https://dexscreener.com/${encodeURIComponent(ch)}/${encodeURIComponent(token)}?embed=1&grayscale=0&chart_type=usd&resolution=1m&range=60m&info=0&trades=0&chartLeftToolbar=0&chartTheme=light&loadChartSettings=1`;
+          const iframe = document.getElementById('dex-iframe');
+          if (iframe) iframe.src = src;
+        } catch {}
+      }
+      function updateGeckoEmbed(token, chain) {
+        try {
+          const ch = (chain || '').toLowerCase();
+          const src = `https://www.geckoterminal.com/${encodeURIComponent(ch)}/pools/${encodeURIComponent(token)}?embed=1&info=0&swaps=0&grayscale=0&light_chart=1&chart_type=price&resolution=1m&range=60m`;
+          const iframe = document.getElementById('gecko-iframe');
+          if (iframe) iframe.src = src;
+        } catch {}
+      }
+
+      document.getElementById('load').onclick = () => { loadCharts(); };
+
+      function stopStreams() {
+        try { if (codexWS) { codexWS.close(); codexWS = null; } } catch {}
+        try { if (goldWS)  { goldWS.close();  goldWS  = null; } } catch {}
+        stopMetricsTimer();
+        try { document.getElementById('stop').textContent = 'Streams Stopped'; } catch {}
+      }
+
+      window.addEventListener('DOMContentLoaded', () => {
+        const input = document.getElementById('pair');
+        const chainSel = document.getElementById('chain');
+        input.value = 'YrrUStgPugDp8BbfosqDeFssen6sA75ZS1QJvgnHtmY';
+        chainSel.value = 'SOLANA';
+        loadCharts();
+        const stopBtn = document.getElementById('stop');
+        if (stopBtn) stopBtn.onclick = () => stopStreams();
+        startMetricsTimer();
+      });
+    </script>
+    <button id="stop" class="stop-btn" title="Close all streams">Stop Streams</button>
+  </body>
+</html>
