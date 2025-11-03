@@ -213,6 +213,7 @@
           <option value="BASE">Base</option>
           <option value="BSC">BSC</option>
           <option value="SOLANA">Solana</option>
+          <option value="HYPERCORE">Hypercore</option>
         </select>
       </div>
       <div>
@@ -748,7 +749,25 @@
         // titles with symbols when meta arrives
         if (codexWS) {
           codexWS.addEventListener('message', (ev) => {
-            try { const m = JSON.parse(ev.data); if (m?.type === 'meta' && m.symbol) codexTokenEl.textContent = `— ${m.symbol} (${chain})`; } catch {}
+            try {
+              const m = JSON.parse(ev.data);
+              if (m?.type === 'meta' && m.symbol) codexTokenEl.textContent = `— ${m.symbol} (${chain})`;
+              if (m?.error && (m?.code === 4403 || /forbidden/i.test(String(m.error)))) {
+                if (codexLoadingEl) {
+                  codexLoadingEl.classList.remove('hidden');
+                  codexLoadingEl.textContent = 'Top-up credits';
+                }
+              }
+            } catch {}
+          });
+          codexWS.addEventListener('close', (ev) => {
+            try {
+              const forbidden = (ev && (ev.code === 4403 || /forbidden/i.test(String(ev.reason || ''))));
+              if (forbidden && codexLoadingEl) {
+                codexLoadingEl.classList.remove('hidden');
+                codexLoadingEl.textContent = 'Top-up credits';
+              }
+            } catch {}
           });
         }
         if (goldWS) {
@@ -761,7 +780,8 @@
       function updateDexEmbed(token, chain) {
         try {
           const ch = (chain || '').toLowerCase();
-          const src = `https://dexscreener.com/${encodeURIComponent(ch)}/${encodeURIComponent(token)}?embed=1&grayscale=0&chart_type=usd&resolution=1m&range=60m&info=0&trades=0&chartLeftToolbar=0&chartTheme=light&loadChartSettings=1`;
+          const chainSlug = ch === 'hypercore' ? 'hyperliquid' : ch;
+          const src = `https://dexscreener.com/${encodeURIComponent(chainSlug)}/${encodeURIComponent(token)}?embed=1&grayscale=0&chart_type=usd&resolution=1m&range=60m&info=0&trades=0&chartLeftToolbar=0&chartTheme=light&loadChartSettings=1`;
           const iframe = document.getElementById('dex-iframe');
           if (iframe) iframe.src = src;
         } catch {}
@@ -769,7 +789,8 @@
       function updateGeckoEmbed(token, chain) {
         try {
           const ch = (chain || '').toLowerCase();
-          const src = `https://www.geckoterminal.com/${encodeURIComponent(ch)}/pools/${encodeURIComponent(token)}?embed=1&info=0&swaps=0&grayscale=0&light_chart=1&chart_type=price&resolution=1m&range=60m`;
+          const chainSlug = ch === 'hypercore' ? 'hyperliquid' : ch;
+          const src = `https://www.geckoterminal.com/${encodeURIComponent(chainSlug)}/pools/${encodeURIComponent(token)}?embed=1&info=0&swaps=0&grayscale=0&light_chart=1&chart_type=price&resolution=1m&range=60m`;
           const iframe = document.getElementById('gecko-iframe');
           if (iframe) iframe.src = src;
         } catch {}

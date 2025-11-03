@@ -24,6 +24,7 @@ const goldrushApiKey = process.env.GOLDRUSH_API_KEY || '';
 function resolveChainEnum(chain?: string | null) {
   const c = (chain || '').toUpperCase();
   if ((StreamingChain as any)[c]) return (StreamingChain as any)[c];
+  if (c === 'HYPERCORE') return (StreamingChain as any).HYPERCORE_MAINNET ?? StreamingChain.BASE_MAINNET;
   if (c === 'BASE') return StreamingChain.BASE_MAINNET;
   if (c === 'BSC') return StreamingChain.BSC_MAINNET;
   if (c === 'SOLANA') return (StreamingChain as any).SOLANA_MAINNET ?? StreamingChain.BASE_MAINNET;
