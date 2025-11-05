@@ -128,6 +128,58 @@
       </div>
     </div>
 
+    <div class="section" id="section-hype">
+      <h2>Hypercore</h2>
+      <div class="controls">
+        <div>
+          <label>Token</label><br/>
+          <input id="token-hype" size="32" placeholder="Symbol or token (e.g., HYPE)" />
+        </div>
+        <div>
+          <label>Interval</label><br/>
+          <select id="interval-hype">
+            <option value="ONE_MINUTE" selected>ONE MINUTE</option>
+          </select>
+        </div>
+        <div>
+          <label>Timeframe</label><br/>
+          <select id="timeframe-hype">
+            <option value="ONE_HOUR" selected>ONE HOUR</option>
+          </select>
+        </div>
+        <div>
+          <button id="load-hype">Load Charts</button>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card" id="gold-card-hype">
+          <header><span class="vendor">GoldRush</span> <span class="subtle" id="gold-token-hype"></span></header>
+          <div class="chart-wrap"><div class="loading" id="gold-loading-hype">Loading…</div><div id="gold-chart-hype" class="chart"></div><div id="gold-legend-hype" class="legend"></div></div>
+          <div class="stats">
+            <div class="stat"><span class="muted">Last updated:</span> <span id="gold-last-hype">—</span></div>
+            <div class="stat"><span class="muted">Refresh rate:</span> <span id="gold-refresh-hype">—</span></div>
+            <div class="stat"><span class="muted">Candle age:</span> <span id="gold-latency-hype">—</span></div>
+            <div class="stat full"><span class="muted">Last item:</span> <span id="gold-lastitem-hype">—</span></div>
+          </div>
+        </div>
+        <div class="card embed">
+          <header><span class="vendor">CoinGecko</span></header>
+          <div class="chart-wrap"><div id="geckoterminal-embed"><iframe id="gecko-iframe-hype" title="GeckoTerminal Embed"></iframe></div></div>
+          <div class="stats"><div class="stat full"><span class="muted">Note:</span> <span>Embedded chart (no sockets)</span></div></div>
+        </div>
+
+        <div class="card" style="grid-column: 1 / -1;">
+          <header><span class="vendor">Streaming Speed Visual</span></header>
+          <div class="sv sv-scroll">
+            <div class="sv-rows">
+              <div class="sv-label">goldrush</div>
+              <div class="sv-track"><div class="sv-scroller"><div id="sv-gold-hype" class="sv-bars"></div><div id="sv-gold-labels-hype" class="sv-labels"></div></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="section" id="section-base">
       <h2>Base</h2>
       <div class="controls">
@@ -301,6 +353,53 @@
       function setLastItem(el, c) { if (!el) return; if (!c) { el.textContent = '—'; return; } el.textContent = `t=${fmtTime(c.time)} | O ${fmtPrice(c.open)} H ${fmtPrice(c.high)} L ${fmtPrice(c.low)} C ${fmtPrice(c.close)}${c.volume!=null?` | V ${fmtNum(Number(c.volume))}`:''}`; }
 
       // Streaming speed helpers per chainKey
+      function relayoutSpeed(chainKey) {
+        try {
+          const barsEl = document.getElementById(`sv-gold-${chainKey}`);
+          const labelsEl = document.getElementById(`sv-gold-labels-${chainKey}`);
+          const trackEl = barsEl?.closest('.sv-track');
+          if (!barsEl || !labelsEl || !trackEl) return;
+
+          const root = getComputedStyle(document.documentElement);
+          const barWVar = (root.getPropertyValue('--sv-bar-w') || '3px').trim();
+          const gapVar  = (root.getPropertyValue('--sv-gap')   || '3px').trim();
+          const barWpx = Math.max(1, parseInt(barWVar, 10) || 3);
+          const gapPx  = Math.max(0, parseInt(gapVar, 10)  || 3);
+
+          const count = barsEl.children.length;
+          const width = trackEl.clientWidth;
+          const needed = count * barWpx + Math.max(0, count - 1) * gapPx;
+
+          function setFit(colPx) {
+            barsEl.style.gridAutoColumns = '';
+            labelsEl.style.gridAutoColumns = '';
+            barsEl.style.gridTemplateColumns = `repeat(${count}, ${colPx}px)`;
+            labelsEl.style.gridTemplateColumns = `repeat(${count}, ${colPx}px)`;
+            barsEl.style.columnGap = `${gapPx}px`;
+            labelsEl.style.columnGap = `${gapPx}px`;
+            barsEl.style.width = '100%';
+            labelsEl.style.width = '100%';
+          }
+          function setNatural() {
+            barsEl.style.gridTemplateColumns = '';
+            labelsEl.style.gridTemplateColumns = '';
+            barsEl.style.gridAutoColumns = `${barWpx}px`;
+            labelsEl.style.gridAutoColumns = `${barWpx}px`;
+            barsEl.style.columnGap = `${gapPx}px`;
+            labelsEl.style.columnGap = `${gapPx}px`;
+            barsEl.style.width = 'max-content';
+            labelsEl.style.width = 'max-content';
+          }
+
+          if (width > 0 && count > 0 && needed < width) {
+            const col = Math.max(barWpx, Math.floor((width - (count - 1) * gapPx) / count));
+            setFit(col);
+          } else {
+            setNatural();
+          }
+        } catch {}
+      }
+
       function ensureBarForGold(chainKey, minute) {
         const svBars = document.getElementById(`sv-gold-${chainKey}`);
         const svLabels = document.getElementById(`sv-gold-labels-${chainKey}`);
@@ -318,6 +417,7 @@
         svLabels.insertBefore(tick, svLabels.children[i] || null);
         svState.minutes.splice(i, 0, minute);
         const entry = { bar, fill }; svState.barsByMinute.set(minute, entry);
+        relayoutSpeed(chainKey);
         return entry;
       }
 
@@ -333,8 +433,12 @@
               views.candles.setData(cs);
               views.volumes.setData(cs.map(c => ({ time: c.time, value: c.volume })));
               for (const b of cs) views.barsByTime.set(b.time, b);
-              try { views.chart.timeScale().scrollToRealTime(); } catch {}
+              try {
+                // one-time scroll on initial snapshot
+                views.chart.timeScale().scrollToRealTime();
+              } catch {}
               state.lastCandle = cs[cs.length - 1].time; state.lastRecv = nowSec;
+              state.lastScrollMinute = utcMinute(state.lastCandle || 0);
               els.loading.classList.add('hidden');
               setLastItem(els.lastItem, cs[cs.length - 1]);
               views.renderLegend(cs[cs.length - 1]);
@@ -348,13 +452,22 @@
                 const minutes = cs.map(c => utcMinute(c.time));
                 const uniqueMinutes = [...new Set(minutes)].sort((a,b)=>a-b);
                 for (const m of uniqueMinutes) ensureBarForGold(chainKey, m);
+                relayoutSpeed(chainKey);
               }
             }
           } else if (msg.type === 'update') {
             const c = { time: msg.candle.time, open: msg.candle.open, high: msg.candle.high, low: msg.candle.low, close: msg.candle.close, volume: Number(msg.candle.volume || 0) };
             views.candles.update(c); views.volumes.update({ time: c.time, value: c.volume }); views.barsByTime.set(c.time, c);
             state.lastCandle = c.time; state.lastRecv = nowSec; setLastItem(els.lastItem, c); els.loading.classList.add('hidden');
-            views.renderLegend(c); try { views.chart.timeScale().scrollToRealTime(); } catch {}
+            views.renderLegend(c);
+            // Reduce jitter: only auto-scroll when we roll over to a NEW minute
+            try {
+              const m = utcMinute(c.time);
+              if (state.lastScrollMinute == null || m > state.lastScrollMinute) {
+                views.chart.timeScale().scrollToRealTime();
+                state.lastScrollMinute = m;
+              }
+            } catch {}
 
             const minute = utcMinute(c.time);
             const entry = ensureBarForGold(chainKey, minute);
@@ -362,6 +475,7 @@
               const pct = Math.max(0, Math.min(100, ((nowSec - minute) / 60) * 100));
               entry.fill.style.height = pct + '%';
             }
+            relayoutSpeed(chainKey);
           }
         };
         return ws;
@@ -370,7 +484,7 @@
       function updateGeckoEmbed(token, chainSlug, iframeId) {
         try {
           const ch = (chainSlug || '').toLowerCase();
-          const slug = ch === 'hypercore' ? 'hyperliquid' : ch;
+          const slug = ch.includes('hypercore') ? 'hyperliquid' : ch;
           const src = `https://www.geckoterminal.com/${encodeURIComponent(slug)}/pools/${encodeURIComponent(token)}?embed=1&info=0&swaps=0&grayscale=0&light_chart=1&chart_type=price&resolution=1m&range=60m`;
           const iframe = document.getElementById(iframeId); if (iframe) iframe.src = src;
         } catch {}
@@ -379,7 +493,7 @@
       // Per-chain controller
       function createChainController(chainKey, chainName) {
         const views = createChart(document.getElementById(`gold-chart-${chainKey}`), document.getElementById(`gold-legend-${chainKey}`));
-        const state = { lastCandle: null, lastRecv: null };
+        const state = { lastCandle: null, lastRecv: null, lastScrollMinute: null };
         let ws = null;
 
         async function load() {
@@ -432,26 +546,93 @@
         return { load, tick };
       }
 
+      // Token-stream controller (for Hypercore)
+      function createTokenChainController(chainKey, chainName) {
+        const views = createChart(document.getElementById(`gold-chart-${chainKey}`), document.getElementById(`gold-legend-${chainKey}`));
+        const state = { lastCandle: null, lastRecv: null, lastScrollMinute: null };
+        let ws = null;
+
+        async function load() {
+          const token = (document.getElementById(`token-${chainKey}`).value || '').trim();
+          if (!token) { alert(`[${chainName}] Enter a token`); return; }
+          try { if (ws) ws.close(); } catch {}
+          state.lastCandle = state.lastRecv = null;
+          document.getElementById(`gold-last-${chainKey}`).textContent = '—';
+          document.getElementById(`gold-refresh-${chainKey}`).textContent = '—';
+          document.getElementById(`gold-latency-${chainKey}`).textContent = '—';
+          document.getElementById(`gold-token-${chainKey}`).textContent = `— (${chainName})`;
+          document.getElementById(`gold-loading-${chainKey}`).classList.remove('hidden');
+          document.getElementById(`sv-gold-${chainKey}`).innerHTML = '';
+          document.getElementById(`sv-gold-labels-${chainKey}`).innerHTML = '';
+
+          const interval  = document.getElementById(`interval-${chainKey}`).value || 'ONE_MINUTE';
+          const timeframe = document.getElementById(`timeframe-${chainKey}`).value || 'ONE_HOUR';
+          const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
+          const baseHost = location.host;
+
+          const url = `${wsScheme}://${baseHost}/ws/goldrush?token=${encodeURIComponent(token)}&chain=${encodeURIComponent(chainName.toUpperCase())}&interval=${encodeURIComponent(interval)}&timeframe=${encodeURIComponent(timeframe)}`;
+          ws = attachGold(url, views, state, {
+            last: document.getElementById(`gold-last-${chainKey}`),
+            refresh: document.getElementById(`gold-refresh-${chainKey}`),
+            latency: document.getElementById(`gold-latency-${chainKey}`),
+            lastItem: document.getElementById(`gold-lastitem-${chainKey}`),
+            loading: document.getElementById(`gold-loading-${chainKey}`)
+          }, chainKey);
+
+          if (ws) { ws.addEventListener('message', (ev) => { try { const m = JSON.parse(ev.data); if (m?.type === 'meta' && m.symbol) document.getElementById(`gold-token-${chainKey}`).textContent = `— ${m.symbol} (${chainName})`; } catch {} }); }
+
+          // Update CoinGecko embed dynamically; default HYPE -> proxy pool address for Hypercore
+          let geckoToken = token;
+          try {
+            if ((chainName || '').toUpperCase().includes('HYPERCORE') && String(token).toUpperCase() === 'HYPE') {
+              geckoToken = '0x0d01dc56dcaaca66ad901c959b4011ec';
+            }
+          } catch {}
+          updateGeckoEmbed(geckoToken, chainName, `gecko-iframe-${chainKey}`);
+        }
+
+        function tick() {
+          const lastEl = document.getElementById(`gold-last-${chainKey}`);
+          const refreshEl = document.getElementById(`gold-refresh-${chainKey}`);
+          const latencyEl = document.getElementById(`gold-latency-${chainKey}`);
+          if (state.lastRecv) {
+            lastEl.textContent = `${fmtTime(state.lastRecv)} (candle ${fmtTime(state.lastCandle)})`;
+            refreshEl.textContent = fmtDelta(state.lastRecv);
+            latencyEl.textContent = fmtLatency(state.lastCandle);
+          }
+        }
+
+        return { load, tick };
+      }
+
       const sol = createChainController('sol', 'SOLANA');
       const base = createChainController('base', 'BASE');
       const bsc = createChainController('bsc', 'BSC');
+      const hype = createTokenChainController('hype', 'HYPERCORE_MAINNET');
 
-      document.getElementById('load-sol').onclick = () => sol.load();
-      document.getElementById('load-base').onclick = () => base.load();
-      document.getElementById('load-bsc').onclick = () => bsc.load();
+      document.getElementById('load-sol').onclick = () => { sol.load(); relayoutSpeed('sol'); };
+      document.getElementById('load-hype').onclick = () => { hype.load(); relayoutSpeed('hype'); };
+      document.getElementById('load-base').onclick = () => { base.load(); relayoutSpeed('base'); };
+      document.getElementById('load-bsc').onclick = () => { bsc.load(); relayoutSpeed('bsc'); };
 
       // defaults
       window.addEventListener('DOMContentLoaded', () => {
         document.getElementById('pair-sol').value = 'YrrUStgPugDp8BbfosqDeFssen6sA75ZS1QJvgnHtmY';
         document.getElementById('pair-base').value = '0x9c087Eb773291e50CF6c6a90ef0F4500e349B903';
         document.getElementById('pair-bsc').value = '0xcF59B8C8BAA2dea520e3D549F97d4e49aDE17057';
+        document.getElementById('token-hype').value = 'HYPE';
         sol.load();
+        hype.load();
         base.load();
         bsc.load();
+        // initial relayout after first render
+        setTimeout(() => { ['sol','hype','base','bsc'].forEach(relayoutSpeed); }, 0);
       });
 
       // global metrics timer
-      setInterval(() => { sol.tick(); base.tick(); bsc.tick(); }, 1000);
+      setInterval(() => { sol.tick(); base.tick(); bsc.tick(); hype.tick(); }, 1000);
+      // relayout on resize
+      window.addEventListener('resize', () => { ['sol','hype','base','bsc'].forEach(relayoutSpeed); });
     </script>
   </body>
   </html>

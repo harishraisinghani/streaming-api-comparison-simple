@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@codex-data/sdk": "^1.0.32",
-    "@covalenthq/client-sdk": "2.3.4",
+    "@covalenthq/client-sdk": "2.3.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
     "ws": "^8.18.3"

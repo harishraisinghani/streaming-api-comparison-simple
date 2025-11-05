@@ -227,7 +227,8 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
           aggHigh = Math.max(aggHigh, e.high);
           aggLow = Math.min(aggLow, e.low);
           aggClose = e.close;
-          if (aggVol != null && e.volume != null) aggVol += e.volume; else if (aggVol == null) aggVol = e.volume ?? null;
+          // volume_usd is an aggregated value for the candle; do not accumulate within the same minute
+          if (e.volume != null) aggVol = e.volume; // overwrite with latest running total
           ws.send(JSON.stringify({ type: 'update', candle: { time: aggMinute, open: aggOpen, high: aggHigh, low: aggLow, close: aggClose, volume: aggVol } }));
         } else if (t > aggMinute) {
           const gap = Math.floor((t - aggMinute) / 60);
