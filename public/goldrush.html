@@ -87,11 +87,13 @@
           <label>Interval</label><br/>
           <select id="interval-sol">
             <option value="ONE_MINUTE" selected>ONE MINUTE</option>
+            <option value="ONE_SECOND">ONE SECOND</option>
           </select>
         </div>
         <div>
           <label>Timeframe</label><br/>
           <select id="timeframe-sol">
+            <option value="FIFTEEN_MINUTES">FIFTEEN MINUTES</option>
             <option value="ONE_HOUR" selected>ONE HOUR</option>
           </select>
         </div>
@@ -139,11 +141,13 @@
           <label>Interval</label><br/>
           <select id="interval-hype">
             <option value="ONE_MINUTE" selected>ONE MINUTE</option>
+            <option value="ONE_SECOND">ONE SECOND</option>
           </select>
         </div>
         <div>
           <label>Timeframe</label><br/>
           <select id="timeframe-hype">
+            <option value="FIFTEEN_MINUTES">FIFTEEN MINUTES</option>
             <option value="ONE_HOUR" selected>ONE HOUR</option>
           </select>
         </div>
@@ -191,11 +195,13 @@
           <label>Interval</label><br/>
           <select id="interval-base">
             <option value="ONE_MINUTE" selected>ONE MINUTE</option>
+            <option value="ONE_SECOND">ONE SECOND</option>
           </select>
         </div>
         <div>
           <label>Timeframe</label><br/>
           <select id="timeframe-base">
+            <option value="FIFTEEN_MINUTES">FIFTEEN MINUTES</option>
             <option value="ONE_HOUR" selected>ONE HOUR</option>
           </select>
         </div>
@@ -243,11 +249,13 @@
           <label>Interval</label><br/>
           <select id="interval-bsc">
             <option value="ONE_MINUTE" selected>ONE MINUTE</option>
+            <option value="ONE_SECOND">ONE SECOND</option>
           </select>
         </div>
         <div>
           <label>Timeframe</label><br/>
           <select id="timeframe-bsc">
+            <option value="FIFTEEN_MINUTES">FIFTEEN MINUTES</option>
             <option value="ONE_HOUR" selected>ONE HOUR</option>
           </select>
         </div>
@@ -287,6 +295,17 @@
     <script>
       // Utils
       function utcMinute(tsSec) { return Math.floor(tsSec / 60) * 60; }
+      function intervalToStepSec(interval) {
+        switch (String(interval || '').toUpperCase()) {
+          case 'ONE_SECOND': return 1;
+          case 'ONE_MINUTE': return 60;
+          case 'FIFTEEN_MINUTES': return 15 * 60;
+          case 'THIRTY_MINUTES': return 30 * 60;
+          case 'ONE_HOUR': return 60 * 60;
+          default: return 60;
+        }
+      }
+      function quantize(ts, step) { return Math.floor(ts / step) * step; }
       function fmtTime(tsSec) {
         if (!tsSec) return '—';
         const d = new Date(tsSec * 1000);
@@ -334,8 +353,21 @@
         } catch {}
         chart.priceScale('left').applyOptions({ scaleMargins: { top: 0.05, bottom: 0.3 } });
         chart.priceScale('right').applyOptions({ scaleMargins: { top: 0.7, bottom: 0.05 } });
-        const candles = chart.addCandlestickSeries({ priceScaleId: 'left', priceFormat: { type: 'price', precision: 7, minMove: 0.0000001 } });
-        const volumes = chart.addHistogramSeries({ priceScaleId: 'right', priceFormat: { type: 'volume' }, color: 'rgba(38,166,154,0.5)' });
+        const UP = '#26a69a';
+        const DOWN = '#ef4444';
+        const UPVOL = 'rgba(38,166,154,0.5)';
+        const DOWNVOL = 'rgba(239,68,68,0.5)';
+        const candles = chart.addCandlestickSeries({
+          priceScaleId: 'left',
+          priceFormat: { type: 'price', precision: 7, minMove: 0.0000001 },
+          upColor: UP,
+          borderUpColor: UP,
+          wickUpColor: UP,
+          downColor: DOWN,
+          borderDownColor: DOWN,
+          wickDownColor: DOWN,
+        });
+        const volumes = chart.addHistogramSeries({ priceScaleId: 'right', priceFormat: { type: 'volume' }, color: UPVOL });
 
         const barsByTime = new Map();
         function renderLegend(bar) {
@@ -347,7 +379,7 @@
                                `<span class="k">V</span><span class="v">${fmtNum(Number(bar.volume||0))}</span>`;
         }
         chart.subscribeCrosshairMove((param) => { if (!param || !param.time) { renderLegend(null); return; } const b = barsByTime.get(param.time); if (b) renderLegend(b); });
-        return { chart, candles, volumes, barsByTime, renderLegend };
+        return { chart, candles, volumes, barsByTime, renderLegend, upVolColor: UPVOL, downVolColor: DOWNVOL };
       }
 
       function setLastItem(el, c) { if (!el) return; if (!c) { el.textContent = '—'; return; } el.textContent = `t=${fmtTime(c.time)} | O ${fmtPrice(c.open)} H ${fmtPrice(c.high)} L ${fmtPrice(c.low)} C ${fmtPrice(c.close)}${c.volume!=null?` | V ${fmtNum(Number(c.volume))}`:''}`; }
@@ -405,14 +437,19 @@
         const svLabels = document.getElementById(`sv-gold-labels-${chainKey}`);
         if (!svBars || !svLabels) return null;
         const stateKey = `__svGold_${chainKey}`;
-        const svState = window[stateKey] ||= { lastMinute: null, barsByMinute: new Map(), minutes: [] };
+        const svState = window[stateKey] ||= { lastMinute: null, barsByMinute: new Map(), minutes: [], stepSec: 60 };
         if (svState.barsByMinute.has(minute)) return svState.barsByMinute.get(minute);
 
         let i = 0; while (i < svState.minutes.length && svState.minutes[i] < minute) i++;
         const bar = document.createElement('div'); bar.className = 'sv-bar';
         const fill = document.createElement('div'); fill.className = 'sv-fill'; bar.appendChild(fill);
         const tick = document.createElement('div'); tick.className = 'sv-tick';
-        const d = new Date(minute * 1000); tick.textContent = `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+        const d = new Date(minute * 1000);
+        if (Number(svState.stepSec) === 1) {
+          tick.textContent = `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}:${String(d.getUTCSeconds()).padStart(2,'0')}`;
+        } else {
+          tick.textContent = `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
+        }
         svBars.insertBefore(bar, svBars.children[i] || null);
         svLabels.insertBefore(tick, svLabels.children[i] || null);
         svState.minutes.splice(i, 0, minute);
@@ -431,10 +468,18 @@
             const cs = (msg.candles || []).map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: Number(c.volume || 0) }));
             if (cs.length) {
               views.candles.setData(cs);
-              views.volumes.setData(cs.map(c => ({ time: c.time, value: c.volume })));
+              views.volumes.setData(cs.map(c => ({ time: c.time, value: c.volume, color: (c.close >= c.open ? views.upVolColor : views.downVolColor) })));
               for (const b of cs) views.barsByTime.set(b.time, b);
               try {
-                // one-time scroll on initial snapshot
+                // one-time zoom so the most recent portion occupies ~3/4 of the chart
+                if (!state.zoomed) {
+                  const last = cs[cs.length - 1];
+                  const first = cs[0];
+                  const span = Math.max(60, (last.time - first.time));
+                  const from = last.time - Math.floor(span * 0.75);
+                  views.chart.timeScale().setVisibleRange({ from, to: last.time });
+                  state.zoomed = true;
+                }
                 views.chart.timeScale().scrollToRealTime();
               } catch {}
               state.lastCandle = cs[cs.length - 1].time; state.lastRecv = nowSec;
@@ -448,16 +493,17 @@
               const svLabels = document.getElementById(`sv-gold-labels-${chainKey}`);
               if (svBars && svLabels) {
                 svBars.innerHTML = ''; svLabels.innerHTML = '';
-                window[`__svGold_${chainKey}`] = { lastMinute: null, barsByMinute: new Map(), minutes: [] };
-                const minutes = cs.map(c => utcMinute(c.time));
-                const uniqueMinutes = [...new Set(minutes)].sort((a,b)=>a-b);
-                for (const m of uniqueMinutes) ensureBarForGold(chainKey, m);
+                const step = Number(state.stepSec || 60);
+                window[`__svGold_${chainKey}`] = { lastMinute: null, barsByMinute: new Map(), minutes: [], stepSec: step };
+                const buckets = cs.map(c => quantize(c.time, step));
+                const uniqueBuckets = [...new Set(buckets)].sort((a,b)=>a-b);
+                for (const b of uniqueBuckets) ensureBarForGold(chainKey, b);
                 relayoutSpeed(chainKey);
               }
             }
           } else if (msg.type === 'update') {
             const c = { time: msg.candle.time, open: msg.candle.open, high: msg.candle.high, low: msg.candle.low, close: msg.candle.close, volume: Number(msg.candle.volume || 0) };
-            views.candles.update(c); views.volumes.update({ time: c.time, value: c.volume }); views.barsByTime.set(c.time, c);
+            views.candles.update(c); views.volumes.update({ time: c.time, value: c.volume, color: (c.close >= c.open ? views.upVolColor : views.downVolColor) }); views.barsByTime.set(c.time, c);
             state.lastCandle = c.time; state.lastRecv = nowSec; setLastItem(els.lastItem, c); els.loading.classList.add('hidden');
             views.renderLegend(c);
             // Reduce jitter: only auto-scroll when we roll over to a NEW minute
@@ -469,10 +515,11 @@
               }
             } catch {}
 
-            const minute = utcMinute(c.time);
-            const entry = ensureBarForGold(chainKey, minute);
+            const step = Number((window[`__svGold_${chainKey}`]?.stepSec) || 60);
+            const bucket = quantize(c.time, step);
+            const entry = ensureBarForGold(chainKey, bucket);
             if (entry && entry.fill) {
-              const pct = Math.max(0, Math.min(100, ((nowSec - minute) / 60) * 100));
+              const pct = Math.max(0, Math.min(100, ((nowSec - bucket) / step) * 100));
               entry.fill.style.height = pct + '%';
             }
             relayoutSpeed(chainKey);
@@ -481,19 +528,50 @@
         return ws;
       }
 
-      function updateGeckoEmbed(token, chainSlug, iframeId) {
+      function updateGeckoEmbed(token, chainSlug, iframeId, rangeMinutes, resolution) {
         try {
           const ch = (chainSlug || '').toLowerCase();
           const slug = ch.includes('hypercore') ? 'hyperliquid' : ch;
-          const src = `https://www.geckoterminal.com/${encodeURIComponent(slug)}/pools/${encodeURIComponent(token)}?embed=1&info=0&swaps=0&grayscale=0&light_chart=1&chart_type=price&resolution=1m&range=60m`;
+          const rng = (Number(rangeMinutes) > 0 ? `${Number(rangeMinutes)}m` : '60m');
+          const res = (String(resolution||'1m').toLowerCase()==='1s' ? '1s' : '1m');
+          const src = `https://www.geckoterminal.com/${encodeURIComponent(slug)}/pools/${encodeURIComponent(token)}?embed=1&info=0&swaps=0&grayscale=0&light_chart=1&chart_type=price&resolution=${res}&range=${rng}`;
           const iframe = document.getElementById(iframeId); if (iframe) iframe.src = src;
+        } catch {}
+      }
+
+      function timeframeToMinutes(tf) {
+        switch (String(tf || '').toUpperCase()) {
+          case 'ONE_MINUTE': return 1;
+          case 'FIFTEEN_MINUTES': return 15;
+          case 'THIRTY_MINUTES': return 30;
+          case 'ONE_HOUR': return 60;
+          case 'FOUR_HOURS': return 240;
+          case 'SIX_HOURS': return 360;
+          case 'TWELVE_HOURS': return 720;
+          case 'ONE_DAY': return 1440;
+          case 'ONE_WEEK': return 10080;
+          case 'ONE_MONTH': return 43200;
+          default: return 60;
+        }
+      }
+      function wireIntervalTimeframe(chainKey) {
+        try {
+          const intervalSel = document.getElementById(`interval-${chainKey}`);
+          const timeframeSel = document.getElementById(`timeframe-${chainKey}`);
+          if (!intervalSel || !timeframeSel) return;
+          intervalSel.addEventListener('change', () => {
+            const v = intervalSel.value;
+            if (v === 'ONE_SECOND') {
+              timeframeSel.value = 'FIFTEEN_MINUTES';
+            }
+          });
         } catch {}
       }
 
       // Per-chain controller
       function createChainController(chainKey, chainName) {
         const views = createChart(document.getElementById(`gold-chart-${chainKey}`), document.getElementById(`gold-legend-${chainKey}`));
-        const state = { lastCandle: null, lastRecv: null, lastScrollMinute: null };
+        const state = { lastCandle: null, lastRecv: null, lastScrollMinute: null, zoomed: false, stepSec: 60 };
         let ws = null;
 
         async function load() {
@@ -514,7 +592,9 @@
           const wsScheme = location.protocol === 'https:' ? 'wss' : 'ws';
           const baseHost = location.host;
 
-          const url = `${wsScheme}://${baseHost}/ws/goldrush?pair=${encodeURIComponent(pair)}&chain=${encodeURIComponent(chainName.toUpperCase())}&interval=${encodeURIComponent(interval)}&timeframe=${encodeURIComponent(timeframe)}`;
+          const chainUpper = String(chainName || '').toUpperCase();
+          const url = `${wsScheme}://${baseHost}/ws/goldrush?pair=${encodeURIComponent(pair)}&chain=${encodeURIComponent(chainUpper)}&interval=${encodeURIComponent(interval)}&timeframe=${encodeURIComponent(timeframe)}`;
+          state.stepSec = intervalToStepSec(interval);
           ws = attachGold(url, views, state, {
             last: document.getElementById(`gold-last-${chainKey}`),
             refresh: document.getElementById(`gold-refresh-${chainKey}`),
@@ -528,7 +608,10 @@
             ws.addEventListener('message', (ev) => { try { const m = JSON.parse(ev.data); if (m?.type === 'meta' && m.symbol) document.getElementById(`gold-token-${chainKey}`).textContent = `— ${m.symbol} (${chainName})`; } catch {} });
           }
 
-          updateGeckoEmbed(pair, chainName, `gecko-iframe-${chainKey}`);
+          const tfMin = timeframeToMinutes(timeframe);
+          const rangeMin = Math.max(15, Math.floor(tfMin * 0.75));
+          const geckoRes = (interval === 'ONE_SECOND') ? '1s' : '1m';
+          updateGeckoEmbed(pair, chainName, `gecko-iframe-${chainKey}`, rangeMin, geckoRes);
         }
 
         // metrics updater
@@ -549,7 +632,7 @@
       // Token-stream controller (for Hypercore)
       function createTokenChainController(chainKey, chainName) {
         const views = createChart(document.getElementById(`gold-chart-${chainKey}`), document.getElementById(`gold-legend-${chainKey}`));
-        const state = { lastCandle: null, lastRecv: null, lastScrollMinute: null };
+        const state = { lastCandle: null, lastRecv: null, lastScrollMinute: null, zoomed: false, stepSec: 60 };
         let ws = null;
 
         async function load() {
@@ -571,6 +654,7 @@
           const baseHost = location.host;
 
           const url = `${wsScheme}://${baseHost}/ws/goldrush?token=${encodeURIComponent(token)}&chain=${encodeURIComponent(chainName.toUpperCase())}&interval=${encodeURIComponent(interval)}&timeframe=${encodeURIComponent(timeframe)}`;
+          state.stepSec = intervalToStepSec(interval);
           ws = attachGold(url, views, state, {
             last: document.getElementById(`gold-last-${chainKey}`),
             refresh: document.getElementById(`gold-refresh-${chainKey}`),
@@ -588,7 +672,10 @@
               geckoToken = '0x0d01dc56dcaaca66ad901c959b4011ec';
             }
           } catch {}
-          updateGeckoEmbed(geckoToken, chainName, `gecko-iframe-${chainKey}`);
+          const tfMin = timeframeToMinutes(timeframe);
+          const rangeMin = Math.max(15, Math.floor(tfMin * 0.75));
+          const geckoRes = (interval === 'ONE_SECOND') ? '1s' : '1m';
+          updateGeckoEmbed(geckoToken, chainName, `gecko-iframe-${chainKey}`, rangeMin, geckoRes);
         }
 
         function tick() {
@@ -627,6 +714,7 @@
         bsc.load();
         // initial relayout after first render
         setTimeout(() => { ['sol','hype','base','bsc'].forEach(relayoutSpeed); }, 0);
+        ['sol','hype','base','bsc'].forEach(wireIntervalTimeframe);
       });
 
       // global metrics timer

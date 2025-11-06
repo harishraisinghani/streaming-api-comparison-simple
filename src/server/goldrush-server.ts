@@ -58,8 +58,8 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
     const qChain = (url.searchParams.get('chain') || defaultChainEnv).toUpperCase();
 
     const chainEnv = qChain.toUpperCase();
-    const intervalEnv = defaultIntervalEnv;
-    const timeframeEnv = defaultTimeframeEnv;
+    const intervalEnv = (url.searchParams.get('interval') || defaultIntervalEnv).toUpperCase();
+    const timeframeEnv = (url.searchParams.get('timeframe') || defaultTimeframeEnv).toUpperCase();
     const tokenAddress = qToken;
     const pairAddress = qPair;
 
@@ -129,11 +129,23 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
 
     let hasSnapshot = false;
     let lastSentTime = 0;
-    let aggMinute: number | null = null;
+    let aggBucket: number | null = null;
     let aggOpen = 0, aggHigh = 0, aggLow = 0, aggClose = 0;
     let aggVol: number | null = null;
 
-    const densifyOneMinuteSeries = (candles: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number | null }>) => {
+    function intervalSeconds(intervalName: string): number {
+      switch (intervalName) {
+        case 'ONE_SECOND': return 1;
+        case 'ONE_MINUTE': return 60;
+        case 'FIFTEEN_MINUTES': return 15 * 60;
+        case 'THIRTY_MINUTES': return 30 * 60;
+        case 'ONE_HOUR': return 60 * 60;
+        default: return 60;
+      }
+    }
+    const stepSec = intervalSeconds(intervalEnv);
+
+    const densifySeries = (candles: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number | null }>, step: number) => {
       if (!candles.length) return candles;
       const byTime = new Map<number, { time: number; open: number; high: number; low: number; close: number; volume: number | null }>();
       for (const c of candles) byTime.set(c.time, c);
@@ -142,7 +154,7 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
       const end: number = sortedTimes[sortedTimes.length - 1] as number;
       const result: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number | null }> = [];
       let prevClose: number = byTime.get(start)!.close;
-      for (let t = start; t <= end; t += 60) {
+      for (let t = start; t <= end; t += step) {
         const c = byTime.get(t);
         if (c) {
           result.push(c);
@@ -158,7 +170,8 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
       return items.map((item: any) => {
         const isoTs = item.timestamp as string | undefined;
         const secondsRaw = isoTs ? Math.floor(new Date(isoTs).getTime() / 1000) : undefined;
-        const seconds = secondsRaw != null ? Math.floor(secondsRaw / 60) * 60 : undefined;
+        // Quantize timestamp to the selected interval (1s => exact seconds, 1m => minute floor, etc.)
+        const seconds = secondsRaw != null ? Math.floor(secondsRaw / stepSec) * stepSec : undefined;
         const rateUsd = Number(item?.quote_rate_usd);
         const rateQ   = Number(item?.quote_rate);
         const factor  = (!isSolanaChain && isFinite(rateUsd) && isFinite(rateQ) && rateQ !== 0)
@@ -201,7 +214,9 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
 
     const handleEvents = (mapped: Array<{ time: number; open: number; high: number; low: number; close: number; volume: number | null }>) => {
       if (!hasSnapshot) {
-        const sorted = densifyOneMinuteSeries(mapped.sort((a, b) => a.time - b.time));
+        const sorted = (intervalEnv === 'ONE_SECOND')
+          ? mapped.sort((a, b) => a.time - b.time) // do NOT densify for 1s; only emit actual data points
+          : densifySeries(mapped.sort((a, b) => a.time - b.time), stepSec);
         if (sorted.length) {
           const last = sorted[sorted.length - 1];
           if (last) lastSentTime = last.time;
@@ -216,25 +231,25 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
       for (const e of events) {
         const t = e.time;
         if (t < lastSentTime) continue;
-        if (aggMinute == null) {
-          aggMinute = t;
+        if (aggBucket == null) {
+          aggBucket = t;
           aggOpen = e.open; aggHigh = e.high; aggLow = e.low; aggClose = e.close; aggVol = (e.volume != null ? e.volume : null);
           lastSentTime = t;
-          ws.send(JSON.stringify({ type: 'update', candle: { time: aggMinute, open: aggOpen, high: aggHigh, low: aggLow, close: aggClose, volume: aggVol } }));
+          ws.send(JSON.stringify({ type: 'update', candle: { time: aggBucket, open: aggOpen, high: aggHigh, low: aggLow, close: aggClose, volume: aggVol } }));
           continue;
         }
-        if (t === aggMinute) {
+        if (t === aggBucket) {
           aggHigh = Math.max(aggHigh, e.high);
           aggLow = Math.min(aggLow, e.low);
           aggClose = e.close;
           // volume_usd is an aggregated value for the candle; do not accumulate within the same minute
           if (e.volume != null) aggVol = e.volume; // overwrite with latest running total
-          ws.send(JSON.stringify({ type: 'update', candle: { time: aggMinute, open: aggOpen, high: aggHigh, low: aggLow, close: aggClose, volume: aggVol } }));
-        } else if (t > aggMinute) {
-          const gap = Math.floor((t - aggMinute) / 60);
-          if (gap > 1) {
+          ws.send(JSON.stringify({ type: 'update', candle: { time: aggBucket, open: aggOpen, high: aggHigh, low: aggLow, close: aggClose, volume: aggVol } }));
+        } else if (t > aggBucket) {
+          const gap = Math.floor((t - aggBucket) / stepSec);
+          if (gap > 1 && intervalEnv !== 'ONE_SECOND') {
             for (let i = 1; i < gap; i++) {
-              const fillT = aggMinute + i * 60;
+              const fillT = aggBucket + i * stepSec;
               const fillOpen = aggClose;
               const fillClose = aggClose;
               const fillHigh = aggClose;
@@ -244,10 +259,10 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
               lastSentTime = fillT;
             }
           }
-          aggMinute = t;
+          aggBucket = t;
           aggOpen = e.open; aggHigh = e.high; aggLow = e.low; aggClose = e.close; aggVol = (e.volume != null ? e.volume : null);
           lastSentTime = t;
-          ws.send(JSON.stringify({ type: 'update', candle: { time: aggMinute, open: aggOpen, high: aggHigh, low: aggLow, close: aggClose, volume: aggVol } }));
+          ws.send(JSON.stringify({ type: 'update', candle: { time: aggBucket, open: aggOpen, high: aggHigh, low: aggLow, close: aggClose, volume: aggVol } }));
         }
       }
     };
