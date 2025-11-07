@@ -172,21 +172,16 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
         const secondsRaw = isoTs ? Math.floor(new Date(isoTs).getTime() / 1000) : undefined;
         // Quantize timestamp to the selected interval (1s => exact seconds, 1m => minute floor, etc.)
         const seconds = secondsRaw != null ? Math.floor(secondsRaw / stepSec) * stepSec : undefined;
-        const rateUsd = Number(item?.quote_rate_usd);
-        const rateQ   = Number(item?.quote_rate);
-        const factor  = (!isSolanaChain && isFinite(rateUsd) && isFinite(rateQ) && rateQ !== 0)
-          ? (rateUsd / rateQ)
-          : 1;
+        // Expect o/h/l/c to already be USD; do not apply additional conversion/scaling
         const openRaw = Number(item?.open);
         const highRaw = Number(item?.high);
         const lowRaw  = Number(item?.low);
         const closeRaw= Number(item?.close);
         if (pairAddress) {
-          const scale = (!isSolanaChain ? 1e8 : 1);
-          const openUsd  = isSolanaChain ? openRaw  : (isFinite(openRaw)  ? (openRaw  * factor) / scale : openRaw);
-          const highUsd  = isSolanaChain ? highRaw  : (isFinite(highRaw)  ? (highRaw  * factor) / scale : highRaw);
-          const lowUsd   = isSolanaChain ? lowRaw   : (isFinite(lowRaw)   ? (lowRaw   * factor) / scale : lowRaw);
-          const closeUsd = isSolanaChain ? closeRaw : (isFinite(closeRaw) ? (closeRaw * factor) / scale : closeRaw);
+          const openUsd  = openRaw;
+          const highUsd  = highRaw;
+          const lowUsd   = lowRaw;
+          const closeUsd = closeRaw;
           return seconds ? {
             time: seconds,
             open: openUsd,
@@ -196,10 +191,10 @@ export function createGoldRushConnectionHandler(): GoldRushConnectionHandler {
             volume: item.volume_usd ?? null,
           } : null;
         } else {
-          const openUsd  = isSolanaChain ? openRaw  : (isFinite(openRaw)  ? openRaw  * factor : openRaw);
-          const highUsd  = isSolanaChain ? highRaw  : (isFinite(highRaw)  ? highRaw  * factor : highRaw);
-          const lowUsd   = isSolanaChain ? lowRaw   : (isFinite(lowRaw)   ? lowRaw   * factor : lowRaw);
-          const closeUsd = isSolanaChain ? closeRaw : (isFinite(closeRaw) ? closeRaw * factor : closeRaw);
+          const openUsd  = openRaw;
+          const highUsd  = highRaw;
+          const lowUsd   = lowRaw;
+          const closeUsd = closeRaw;
           return seconds ? {
             time: seconds,
             open: openUsd,
